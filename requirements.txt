@@ -1,0 +1,11 @@
+audioop-lts>=0.2
+flask>=3.0
+flask-cors>=4.0
+edge-tts>=6.1
+pydub>=0.25
+gunicorn>=22.0
+youtube-transcript-api>=0.6
+trafilatura>=1.6
+google-generativeai>=0.5
+PyPDF2>=3.0
+requests>=2.31
