@@ -339,9 +339,9 @@ def generate_script_route():
     # Check env vars as fallback based on provider
     if not api_key:
         env_map = {
-            "gemini": "GEMINI_API_KEY",
-            "openrouter": "OPENROUTER_API_KEY",
-            "groq": "GROQ_API_KEY",
+            "gemini": "PF_GEMINI_KEY",
+            "openrouter": "PF_OPENROUTER_KEY",
+            "groq": "PF_GROQ_KEY",
         }
         api_key = os.environ.get(env_map.get(provider, ""), "")
 
