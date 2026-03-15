@@ -1,3 +1,4 @@
+audioop-lts>=0.2
 flask>=3.0
 flask-cors>=4.0
 edge-tts>=6.1
