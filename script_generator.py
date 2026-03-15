@@ -90,26 +90,35 @@ def scrape_article(url: str) -> dict:
         return {"title": "", "text": "", "source": url, "error": "trafilatura not installed"}
 
     try:
-        downloaded = trafilatura.fetch_url(url)
+        # Use requests with a short timeout instead of trafilatura's built-in fetcher
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; PodForge/1.0)"}
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        downloaded = resp.text
+
         if not downloaded:
             return {"title": "", "text": "", "source": url, "error": "Could not download page"}
 
         text = trafilatura.extract(downloaded, include_comments=False, include_tables=False)
-        metadata = trafilatura.extract(downloaded, output_format="json")
-
+        
         title = url
-        if metadata:
-            try:
+        try:
+            metadata = trafilatura.extract(downloaded, output_format="json")
+            if metadata:
                 meta_dict = json.loads(metadata) if isinstance(metadata, str) else metadata
                 title = meta_dict.get("title", url) or url
-            except:
-                pass
+        except:
+            pass
 
         if not text:
             return {"title": title, "text": "", "source": url, "error": "Could not extract text from page"}
 
         return {"title": title, "text": text, "source": url, "error": None}
 
+    except requests.Timeout:
+        return {"title": "", "text": "", "source": url, "error": "Page took too long to load (15s timeout)"}
+    except requests.RequestException as e:
+        return {"title": "", "text": "", "source": url, "error": f"Could not fetch page: {str(e)}"}
     except Exception as e:
         return {"title": "", "text": "", "source": url, "error": f"Scrape error: {str(e)}"}
 
