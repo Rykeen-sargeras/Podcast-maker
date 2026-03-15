@@ -330,15 +330,28 @@ def ingest_pdf():
 
 @app.route("/api/generate-script", methods=["POST"])
 def generate_script_route():
-    """Generate a podcast script from sources using Gemini."""
+    """Generate a podcast script from sources using selected AI provider."""
     data = request.json
 
+    provider = data.get("provider", "gemini").strip().lower()
     api_key = data.get("api_key", "").strip()
+
+    # Check env vars as fallback based on provider
     if not api_key:
-        # Also check env var
-        api_key = os.environ.get("GEMINI_API_KEY", "")
+        env_map = {
+            "gemini": "GEMINI_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
+            "groq": "GROQ_API_KEY",
+        }
+        api_key = os.environ.get(env_map.get(provider, ""), "")
+
     if not api_key:
-        return jsonify({"error": "Gemini API key required. Get one free at https://aistudio.google.com/apikey"}), 400
+        help_urls = {
+            "gemini": "https://aistudio.google.com/apikey",
+            "openrouter": "https://openrouter.ai/keys",
+            "groq": "https://console.groq.com/keys",
+        }
+        return jsonify({"error": f"API key required for {provider}. Get one free at {help_urls.get(provider, '')}"}), 400
 
     topic = data.get("topic", "")
     style = data.get("style", "interview")
@@ -372,6 +385,7 @@ def generate_script_route():
         custom_speakers=custom_speakers,
         additional_instructions=instructions,
         topic=topic,
+        provider=provider,
     )
 
     return jsonify(result)

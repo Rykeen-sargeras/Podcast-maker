@@ -118,10 +118,25 @@
     <div class="step">
       <div class="step-header">
         <span class="step-num purple">API</span>
-        <span class="step-title">Gemini API Key</span>
+        <span class="step-title">AI Provider</span>
       </div>
-      <input type="password" id="geminiKey" placeholder="Paste your Gemini API key here...">
-      <p class="api-hint">Free &mdash; 15 req/min, no credit card. Get yours at <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a>. Key stays in your browser, only sent to Google.</p>
+      <div class="grid-2" style="margin-bottom:16px">
+        <div>
+          <label class="field-label">Provider</label>
+          <div class="select-wrap">
+            <select id="aiProvider" onchange="updateProviderHint()">
+              <option value="gemini">Google Gemini (free, 15 req/min)</option>
+              <option value="groq">Groq (free, 30 req/min, fast)</option>
+              <option value="openrouter">OpenRouter (free models available)</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="field-label">API Key</label>
+          <input type="password" id="geminiKey" placeholder="Paste your API key here...">
+        </div>
+      </div>
+      <p class="api-hint" id="providerHint">Free &mdash; 15 req/min, no credit card. Get yours at <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a></p>
     </div>
 
     <div class="step">
@@ -310,6 +325,15 @@ function updateSpeakerHint(){
   document.getElementById('speakerHint').textContent=`Leave blank for defaults: ${d[document.getElementById('genStyle').value]||'Host, Guest'}`;
 }
 
+function updateProviderHint(){
+  const hints={
+    gemini:'Free — 15 req/min, no credit card. Get yours at <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a>',
+    groq:'Free — 30 req/min, very fast. Get yours at <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys</a>',
+    openrouter:'Free models available (DeepSeek, Llama). Get key at <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>',
+  };
+  document.getElementById('providerHint').innerHTML=hints[document.getElementById('aiProvider').value]||'';
+}
+
 function renderSources(){
   const list=document.getElementById('sourcesList');
   if(!collectedSources.length){list.innerHTML='';return;}
@@ -360,7 +384,8 @@ async function addPDF(){
 
 async function generateScript(){
   const apiKey=document.getElementById('geminiKey').value.trim();
-  if(!apiKey){showToast('Enter your Gemini API key first');return;}
+  if(!apiKey){showToast('Enter your API key first');return;}
+  const provider=document.getElementById('aiProvider').value;
   const topic=document.getElementById('genTopic').value.trim();
   const rawText=document.getElementById('rawText').value.trim();
   const style=document.getElementById('genStyle').value;
@@ -378,7 +403,7 @@ async function generateScript(){
 
   try{
     const r=await fetch(`${API}/api/generate-script`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({api_key:apiKey,topic,style,duration_minutes:duration,custom_speakers:customSpeakers,additional_instructions:instructions,sources,raw_texts})});
+      body:JSON.stringify({api_key:apiKey,provider,topic,style,duration_minutes:duration,custom_speakers:customSpeakers,additional_instructions:instructions,sources,raw_texts})});
     const d=await r.json();
     if(d.error){showToast(d.error);return;}
     generatedScript=d.script;

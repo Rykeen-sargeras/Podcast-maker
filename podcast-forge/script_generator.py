@@ -13,11 +13,6 @@ from typing import Optional
 import requests
 import google.generativeai as genai
 from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import (
-    TranscriptsDisabled,
-    NoTranscriptFound,
-    VideoUnavailable,
-)
 
 try:
     import trafilatura
@@ -55,25 +50,9 @@ def get_youtube_transcript(url: str) -> dict:
         return {"title": "", "text": "", "source": url, "error": "Could not parse YouTube URL"}
 
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        # Prefer manual English, then auto-generated English, then any
-        transcript = None
-        try:
-            transcript = transcript_list.find_manually_created_transcript(["en"])
-        except NoTranscriptFound:
-            try:
-                transcript = transcript_list.find_generated_transcript(["en"])
-            except NoTranscriptFound:
-                # Get whatever is available
-                for t in transcript_list:
-                    transcript = t
-                    break
-
-        if transcript is None:
-            return {"title": "", "text": "", "source": url, "error": "No transcript available"}
-
-        entries = transcript.fetch()
-        full_text = " ".join(entry.get("text", entry.get("value", "")) if isinstance(entry, dict) else str(entry) for entry in entries)
+        api = YouTubeTranscriptApi()
+        result = api.fetch(video_id, languages=["en"])
+        full_text = " ".join(snippet.text for snippet in result)
 
         # Try to get video title via oembed (no API key needed)
         title = f"YouTube Video ({video_id})"
@@ -89,12 +68,15 @@ def get_youtube_transcript(url: str) -> dict:
 
         return {"title": title, "text": full_text, "source": url, "error": None}
 
-    except TranscriptsDisabled:
-        return {"title": "", "text": "", "source": url, "error": "Transcripts are disabled for this video"}
-    except VideoUnavailable:
-        return {"title": "", "text": "", "source": url, "error": "Video is unavailable"}
     except Exception as e:
-        return {"title": "", "text": "", "source": url, "error": f"Transcript error: {str(e)}"}
+        error_msg = str(e)
+        if "disabled" in error_msg.lower():
+            error_msg = "Transcripts are disabled for this video"
+        elif "unavailable" in error_msg.lower() or "not found" in error_msg.lower():
+            error_msg = "Video is unavailable or not found"
+        else:
+            error_msg = f"Transcript error: {error_msg}"
+        return {"title": "", "text": "", "source": url, "error": error_msg}
 
 
 # ─── Web Article Extraction ──────────────────────────────────────────────────
@@ -263,6 +245,60 @@ Write ONLY the script. No preamble, no notes, no explanations before or after. S
     return prompt
 
 
+# ─── Multi-Provider Script Generation ────────────────────────────────────────
+
+def _call_gemini(api_key: str, prompt: str) -> str:
+    """Call Google Gemini API."""
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-2.0-flash")
+    response = model.generate_content(
+        prompt,
+        generation_config=genai.GenerationConfig(
+            max_output_tokens=8192,
+            temperature=0.85,
+        ),
+    )
+    return response.text.strip()
+
+
+def _call_openrouter(api_key: str, prompt: str, model_id: str = "deepseek/deepseek-chat-v3-0324:free") -> str:
+    """Call OpenRouter API (OpenAI-compatible). Works with free models."""
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "HTTP-Referer": "https://podforge.app",
+        "X-Title": "PodForge",
+    }
+    body = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 8192,
+        "temperature": 0.85,
+    }
+    resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body, timeout=120)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"].strip()
+
+
+def _call_groq(api_key: str, prompt: str) -> str:
+    """Call Groq API (fast, free tier)."""
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    body = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 8192,
+        "temperature": 0.85,
+    }
+    resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=body, timeout=120)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"].strip()
+
+
 def generate_script(
     api_key: str,
     sources: list[dict],
@@ -271,18 +307,17 @@ def generate_script(
     custom_speakers: Optional[list[str]] = None,
     additional_instructions: str = "",
     topic: str = "",
+    provider: str = "gemini",
 ) -> dict:
     """
-    Generate a podcast script using Google Gemini.
+    Generate a podcast script using the selected provider.
+    Providers: gemini, openrouter, groq
     Returns {"script": str, "error": str|None, "speakers_found": list}
     """
     if not api_key:
-        return {"script": "", "error": "No Gemini API key provided", "speakers_found": []}
+        return {"script": "", "error": "No API key provided", "speakers_found": []}
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-
         prompt = build_prompt(
             sources=sources,
             style=style,
@@ -292,15 +327,12 @@ def generate_script(
             topic=topic,
         )
 
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(
-                max_output_tokens=8192,
-                temperature=0.85,
-            ),
-        )
-
-        script = response.text.strip()
+        if provider == "groq":
+            script = _call_groq(api_key, prompt)
+        elif provider == "openrouter":
+            script = _call_openrouter(api_key, prompt)
+        else:  # gemini (default)
+            script = _call_gemini(api_key, prompt)
 
         # Extract speakers found in the generated script
         speakers = list(dict.fromkeys(
@@ -311,12 +343,14 @@ def generate_script(
 
     except Exception as e:
         error_msg = str(e)
-        if "API_KEY_INVALID" in error_msg or "401" in error_msg:
-            error_msg = "Invalid Gemini API key. Get a free one at https://aistudio.google.com/apikey"
-        elif "429" in error_msg or "quota" in error_msg.lower():
-            error_msg = "Rate limit hit. Free tier allows 15 requests/minute. Wait a moment and try again."
+        if "API_KEY_INVALID" in error_msg or "401" in error_msg or "Unauthorized" in error_msg:
+            error_msg = f"Invalid API key for {provider}."
+        elif "429" in error_msg or "quota" in error_msg.lower() or "rate" in error_msg.lower():
+            error_msg = f"Rate limit hit on {provider}. Wait a moment or switch providers."
         elif "safety" in error_msg.lower():
-            error_msg = "Content was blocked by Gemini's safety filter. Try adjusting your topic or instructions."
+            error_msg = "Content blocked by safety filter. Try adjusting your topic."
+        else:
+            error_msg = f"{provider} error: {error_msg}"
         return {"script": "", "error": error_msg, "speakers_found": []}
 
 
