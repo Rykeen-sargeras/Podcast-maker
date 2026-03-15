@@ -355,7 +355,8 @@ def generate_script_route():
 
     topic = data.get("topic", "")
     style = data.get("style", "interview")
-    duration = int(data.get("duration_minutes", 10))
+    duration_min = int(data.get("duration_min", 5))
+    duration_max = int(data.get("duration_max", 15))
     custom_speakers = data.get("custom_speakers", None)
     instructions = data.get("additional_instructions", "")
 
@@ -381,7 +382,8 @@ def generate_script_route():
         api_key=api_key,
         sources=sources,
         style=style,
-        duration_minutes=duration,
+        duration_min=duration_min,
+        duration_max=duration_max,
         custom_speakers=custom_speakers,
         additional_instructions=instructions,
         topic=topic,

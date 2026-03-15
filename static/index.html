@@ -66,6 +66,7 @@
   .input-row { display:flex; gap:10px; margin-top:12px; } .input-row input { flex:1; }
   .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
   .grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+  .grid-4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:16px; }
   .speakers-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:16px; }
   .speaker-card { background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:20px; transition:border-color .3s; }
   .speaker-card:hover { border-color:#3a3a48; }
@@ -96,7 +97,7 @@
   .script-hint code { background:var(--surface-3); padding:2px 6px; border-radius:4px; color:var(--accent-2); }
   .divider { height:1px; background:var(--border); margin:20px 0; }
   .section-label { font-size:14px; font-weight:600; margin-bottom:12px; color:var(--text); }
-  @media(max-width:640px) { .app{padding:24px 16px 60px} .step{padding:20px} .speakers-grid{grid-template-columns:1fr} .grid-2,.grid-3{grid-template-columns:1fr} .input-row{flex-direction:column} }
+  @media(max-width:640px) { .app{padding:24px 16px 60px} .step{padding:20px} .speakers-grid{grid-template-columns:1fr} .grid-2,.grid-3,.grid-4{grid-template-columns:1fr} .input-row{flex-direction:column} }
 </style>
 </head>
 <body>
@@ -148,7 +149,7 @@
         <label class="field-label">Main Topic / Title</label>
         <input type="text" id="genTopic" placeholder="e.g. The future of AI in healthcare, Bitcoin's next move, How to learn faster...">
       </div>
-      <div class="grid-3">
+      <div class="grid-4">
         <div>
           <label class="field-label">Podcast Style</label>
           <div class="select-wrap">
@@ -162,8 +163,12 @@
           </div>
         </div>
         <div>
-          <label class="field-label">Duration (minutes)</label>
-          <input type="number" id="genDuration" value="10" min="1" max="60">
+          <label class="field-label">Min Duration (minutes)</label>
+          <input type="number" id="genDurationMin" value="5" min="1" max="60">
+        </div>
+        <div>
+          <label class="field-label">Max Duration (minutes)</label>
+          <input type="number" id="genDurationMax" value="15" min="1" max="60">
         </div>
         <div>
           <label class="field-label">Custom Speakers (optional)</label>
@@ -389,7 +394,8 @@ async function generateScript(){
   const topic=document.getElementById('genTopic').value.trim();
   const rawText=document.getElementById('rawText').value.trim();
   const style=document.getElementById('genStyle').value;
-  const duration=parseInt(document.getElementById('genDuration').value)||10;
+  const duration_min=parseInt(document.getElementById('genDurationMin').value)||5;
+  const duration_max=parseInt(document.getElementById('genDurationMax').value)||15;
   const spkRaw=document.getElementById('genSpeakers').value.trim();
   const instructions=document.getElementById('genInstructions').value.trim();
   const sources=collectedSources.filter(s=>s.text&&!s.error);
@@ -403,13 +409,18 @@ async function generateScript(){
 
   try{
     const r=await fetch(`${API}/api/generate-script`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({api_key:apiKey,provider,topic,style,duration_minutes:duration,custom_speakers:customSpeakers,additional_instructions:instructions,sources,raw_texts})});
+      body:JSON.stringify({api_key:apiKey,provider,topic,style,duration_min,duration_max,custom_speakers:customSpeakers,additional_instructions:instructions,sources,raw_texts})});
     const d=await r.json();
     if(d.error){showToast(d.error);return;}
     generatedScript=d.script;
     document.getElementById('scriptPreview').textContent=d.script;
     document.getElementById('scriptOutput').classList.remove('hidden');
-    showToast(`Script generated! ${(d.speakers_found||[]).length} speakers.`);
+
+    const wc = d.word_count || 0;
+    const em = d.est_minutes || 0;
+    let msg = `Script generated! ${(d.speakers_found||[]).length} speakers, ~${wc} words (~${em} min).`;
+    if(d.warning) msg += ' ⚠️ ' + d.warning;
+    showToast(msg);
   }catch(e){showToast('Generation failed');console.error(e);}
   finally{btn.disabled=false;btn.textContent='⚡ Generate Podcast Script';st.classList.remove('visible');}
 }

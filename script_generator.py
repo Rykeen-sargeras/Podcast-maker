@@ -182,12 +182,13 @@ STYLE_PROMPTS = {
 def build_prompt(
     sources: list[dict],
     style: str,
-    duration_minutes: int,
+    duration_min: int,
+    duration_max: int,
     custom_speakers: Optional[list[str]],
     additional_instructions: str,
     topic: str,
 ) -> str:
-    """Build the Gemini prompt from collected sources and settings."""
+    """Build the prompt from collected sources and settings."""
 
     style_info = STYLE_PROMPTS.get(style, STYLE_PROMPTS["interview"])
 
@@ -212,8 +213,10 @@ def build_prompt(
 
     sources_block = "\n\n".join(source_sections) if source_sections else "(No source material provided — generate based on the topic alone.)"
 
-    # Estimate word count (~150 words per minute of spoken audio)
-    target_words = duration_minutes * 150
+    # Word count math: ~150 words per minute of spoken audio
+    min_words = duration_min * 150
+    max_words = int(duration_max * 150 * 1.10)  # allow 10% over the max
+    target_words = int((duration_min + duration_max) / 2 * 150)  # aim for midpoint
 
     prompt = f"""You are a professional podcast script writer. Write a complete, ready-to-read podcast script.
 
@@ -222,7 +225,13 @@ TOPIC: {topic}
 PODCAST STYLE: {style_info['description']}
 TONE: {style_info['tone']}
 SPEAKERS: {speakers_str}
-TARGET LENGTH: ~{target_words} words ({duration_minutes} minutes of spoken audio)
+
+LENGTH REQUIREMENTS (THIS IS CRITICAL — YOU MUST FOLLOW THESE):
+- MINIMUM: {min_words} words ({duration_min} minutes). The script MUST be at least this long. A script shorter than this is a failure.
+- TARGET: {target_words} words (~{(duration_min + duration_max) // 2} minutes). Aim for this length.
+- MAXIMUM: {max_words} words (~{duration_max} minutes + 10% buffer). Do not exceed this.
+- At ~150 words per minute of speech, {min_words} words = {duration_min} minutes, {max_words} words = ~{round(max_words / 150)} minutes.
+- COUNT YOUR WORDS. If you are under {min_words} words, you MUST add more content. Go deeper into the topics, add more examples, more back-and-forth, more anecdotes. Do NOT wrap up early.
 
 RESEARCH MATERIAL:
 {sources_block}
@@ -232,12 +241,15 @@ INSTRUCTIONS:
   Speaker Name: Their dialogue here.
 - Make the conversation feel NATURAL — include filler words occasionally, reactions like "Right", "Exactly", "Hmm interesting", interruptions, and conversational flow
 - Start with an engaging cold open or hook
-- Cover the key points from the source material accurately
+- Cover ALL key points from the source material thoroughly — don't skip or summarize, go deep
+- When you have lots of source material, discuss each major point in detail with examples and opinions
+- Include tangents, personal anecdotes, analogies, and "what if" scenarios to fill out the conversation naturally
 - End with a memorable closing / call to action
 - Do NOT include stage directions, sound effects, or anything in brackets or parentheses
 - Do NOT include episode numbers, timestamps, or metadata
 - Each speaker line should be 1-3 sentences (natural speech length)
 - The script should flow naturally as if real people are talking
+- REMEMBER: The script MUST be at least {min_words} words. Write a LONG, thorough, detailed script. More content is better than less.
 {f"- Additional instructions: {additional_instructions}" if additional_instructions else ""}
 
 Write ONLY the script. No preamble, no notes, no explanations before or after. Start directly with the first speaker line."""
@@ -303,7 +315,8 @@ def generate_script(
     api_key: str,
     sources: list[dict],
     style: str = "interview",
-    duration_minutes: int = 10,
+    duration_min: int = 5,
+    duration_max: int = 15,
     custom_speakers: Optional[list[str]] = None,
     additional_instructions: str = "",
     topic: str = "",
@@ -312,7 +325,7 @@ def generate_script(
     """
     Generate a podcast script using the selected provider.
     Providers: gemini, openrouter, groq
-    Returns {"script": str, "error": str|None, "speakers_found": list}
+    Returns {"script": str, "error": str|None, "speakers_found": list, "word_count": int, "est_minutes": float}
     """
     if not api_key:
         return {"script": "", "error": "No API key provided", "speakers_found": []}
@@ -321,7 +334,8 @@ def generate_script(
         prompt = build_prompt(
             sources=sources,
             style=style,
-            duration_minutes=duration_minutes,
+            duration_min=duration_min,
+            duration_max=duration_max,
             custom_speakers=custom_speakers,
             additional_instructions=additional_instructions,
             topic=topic,
@@ -339,7 +353,26 @@ def generate_script(
             re.findall(r"^([A-Za-z0-9_ .'-]+?):", script, re.MULTILINE)
         ))
 
-        return {"script": script, "error": None, "speakers_found": speakers}
+        # Calculate word count and estimated duration
+        word_count = len(script.split())
+        est_minutes = round(word_count / 150, 1)
+        min_words = duration_min * 150
+        max_words = int(duration_max * 150 * 1.10)
+
+        warning = None
+        if word_count < min_words:
+            warning = f"Script is ~{est_minutes} min ({word_count} words) — under the {duration_min} min minimum ({min_words} words). Try regenerating or adding more source material."
+        elif word_count > max_words:
+            warning = f"Script is ~{est_minutes} min ({word_count} words) — over the {duration_max} min maximum. You may want to trim it."
+
+        return {
+            "script": script,
+            "error": None,
+            "speakers_found": speakers,
+            "word_count": word_count,
+            "est_minutes": est_minutes,
+            "warning": warning,
+        }
 
     except Exception as e:
         error_msg = str(e)
